@@ -26,26 +26,6 @@ CLAUDE_MODEL = "claude-sonnet-5"
 
 st.set_page_config(page_title="NBA Predictor", page_icon="🏀", layout="wide")
 
-# ── Sidebar ───────────────────────────────────────────────────────────────────
-with st.sidebar:
-    st.title("🏀 NBA Predictor")
-    st.caption(f"Updated: {datetime.now().strftime('%b %d, %Y')}")
-    page = st.radio("Navigate", [
-        "🏟️  Tonight's Games",
-        "📊  Player Projections",
-        "🧪  Custom Matchup",
-        "💬  Ask Claude",
-    ])
-    st.divider()
-    claude_api_key = st.text_input(
-        "Anthropic API Key", type="password",
-        help="Only needed for Ask Claude. Get one free at console.anthropic.com"
-    )
-    st.divider()
-    st.caption("Model: XGBoost + walk-forward CV")
-    st.caption("⚠️ For informational use only.")
-
-
 # ── Data loaders ──────────────────────────────────────────────────────────────
 @st.cache_data(ttl=300)
 def load_predictions():
@@ -62,6 +42,28 @@ def load_player_projections():
     if not os.path.exists(path):
         return pd.DataFrame()
     return pd.read_csv(path)
+
+
+HAS_TONIGHT_GAMES = bool(load_predictions())
+
+# ── Sidebar ───────────────────────────────────────────────────────────────────
+with st.sidebar:
+    st.title("🏀 NBA Predictor")
+    st.caption(f"Updated: {datetime.now().strftime('%b %d, %Y')}")
+    nav_options = []
+    if HAS_TONIGHT_GAMES:
+        nav_options.append("🏟️  Tonight's Games")
+    nav_options += ["📊  Player Projections", "🧪  Custom Matchup", "💬  Ask Claude"]
+    default_index = nav_options.index("🧪  Custom Matchup") if not HAS_TONIGHT_GAMES else 0
+    page = st.radio("Navigate", nav_options, index=default_index)
+    st.divider()
+    claude_api_key = st.text_input(
+        "Anthropic API Key", type="password",
+        help="Only needed for Ask Claude. Get one free at console.anthropic.com"
+    )
+    st.divider()
+    st.caption("Model: XGBoost + walk-forward CV")
+    st.caption("⚠️ For informational use only.")
 
 
 # ── Player table renderer ─────────────────────────────────────────────────────
@@ -158,17 +160,36 @@ def load_all_teams():
 
 
 @st.cache_data(ttl=300)
-def cached_lineup(team_abbr, out_players):
-    from lineups.resolver import resolve_lineup
-    overrides = {name: "Out" for name in out_players} if out_players else None
-    return resolve_lineup(team_abbr, manual_overrides=overrides)
+def cached_lineup(team_abbr, out_players, questionable_players, available_players, assume_healthy):
+    from lineups.resolver import resolve_lineup, STATUS_OUT, STATUS_QUESTIONABLE, STATUS_AVAILABLE
+    overrides = {}
+    for name in available_players:
+        overrides[name] = STATUS_AVAILABLE
+    for name in questionable_players:
+        overrides[name] = STATUS_QUESTIONABLE
+    for name in out_players:
+        overrides[name] = STATUS_OUT
+    return resolve_lineup(
+        team_abbr,
+        manual_overrides=overrides or None,
+        ignore_injury_report=assume_healthy,
+    )
 
 
 def render_matchup_page():
+    if not HAS_TONIGHT_GAMES:
+        st.warning("No games scheduled tonight — use the simulator to model any matchup.")
     st.title("🧪 Custom Matchup Simulator")
     st.caption(
         "Simulate any two teams with the trained models and each team's recent form. "
         "This is a hypothetical simulation, not a prediction of a real scheduled game."
+    )
+
+    assume_healthy = st.toggle(
+        "Assume all players healthy",
+        value=not HAS_TONIGHT_GAMES,
+        help="Ignores the injury report and sets every player's play probability to 1.0, "
+             "except anyone you manually mark Out or Questionable below.",
     )
 
     try:
@@ -190,18 +211,30 @@ def render_matchup_page():
 
     st.divider()
     st.subheader("Optional: adjust lineups")
-    st.caption("Mark a player OUT to simulate them missing the game — their minutes are "
-               "redistributed across the rest of the roster.")
+    st.caption("Mark a player Out to simulate them missing the game, Questionable to scale "
+               "down their minutes, or Available to override a Likely Injured / reported-out "
+               "player and simulate them being healthy.")
 
     lc1, lc2 = st.columns(2)
-    home_out, away_out = [], []
+    home_out, home_questionable, home_available = [], [], []
+    away_out, away_questionable, away_available = [], [], []
 
     with lc1:
         st.markdown(f"**{team_names[home_abbr]}**")
         try:
-            home_baseline = cached_lineup(home_abbr, ())
-            home_out = st.multiselect(
-                "Mark OUT", home_baseline["PLAYER_NAME"].tolist(), key=f"home_out_{home_abbr}"
+            home_roster  = cached_lineup(home_abbr, (), (), (), True)
+            home_default = cached_lineup(home_abbr, (), (), (), assume_healthy)
+            home_names = home_roster["PLAYER_NAME"].tolist()
+            home_unavailable = home_default.loc[
+                home_default["STATUS"] != "Available", "PLAYER_NAME"
+            ].tolist()
+
+            home_out = st.multiselect("Mark Out", home_names, key=f"home_out_{home_abbr}")
+            home_questionable = st.multiselect(
+                "Mark Questionable", home_names, key=f"home_questionable_{home_abbr}"
+            )
+            home_available = st.multiselect(
+                "Mark Available", home_unavailable, key=f"home_available_{home_abbr}"
             )
         except Exception:
             st.info("No roster data yet — run `python run.py --setup` first.")
@@ -209,9 +242,19 @@ def render_matchup_page():
     with lc2:
         st.markdown(f"**{team_names[away_abbr]}**")
         try:
-            away_baseline = cached_lineup(away_abbr, ())
-            away_out = st.multiselect(
-                "Mark OUT", away_baseline["PLAYER_NAME"].tolist(), key=f"away_out_{away_abbr}"
+            away_roster  = cached_lineup(away_abbr, (), (), (), True)
+            away_default = cached_lineup(away_abbr, (), (), (), assume_healthy)
+            away_names = away_roster["PLAYER_NAME"].tolist()
+            away_unavailable = away_default.loc[
+                away_default["STATUS"] != "Available", "PLAYER_NAME"
+            ].tolist()
+
+            away_out = st.multiselect("Mark Out", away_names, key=f"away_out_{away_abbr}")
+            away_questionable = st.multiselect(
+                "Mark Questionable", away_names, key=f"away_questionable_{away_abbr}"
+            )
+            away_available = st.multiselect(
+                "Mark Available", away_unavailable, key=f"away_available_{away_abbr}"
             )
         except Exception:
             st.info("No roster data yet — run `python run.py --setup` first.")
@@ -222,8 +265,14 @@ def render_matchup_page():
         from pipeline import predict_game_full
         with st.spinner("Simulating matchup..."):
             try:
-                home_lineup = cached_lineup(home_abbr, tuple(sorted(home_out)))
-                away_lineup = cached_lineup(away_abbr, tuple(sorted(away_out)))
+                home_lineup = cached_lineup(
+                    home_abbr, tuple(sorted(home_out)), tuple(sorted(home_questionable)),
+                    tuple(sorted(home_available)), assume_healthy
+                )
+                away_lineup = cached_lineup(
+                    away_abbr, tuple(sorted(away_out)), tuple(sorted(away_questionable)),
+                    tuple(sorted(away_available)), assume_healthy
+                )
                 st.session_state["matchup_result"] = predict_game_full(
                     home_abbr, away_abbr, home_lineup, away_lineup
                 )

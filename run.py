@@ -6,9 +6,11 @@ run.py — single entrypoint for everything.
   python run.py --final       90 min before tip-off: confirmed lineups
   python run.py --retrain     Weekly: retrain models on latest data
   python run.py --backtest    Run backtesting only, no retraining
+  python run.py --simulate    Skip the daily refresh, launch UI in simulation-only mode
 """
 
 import argparse
+import subprocess
 import sys
 import os
 sys.path.insert(0, os.path.dirname(__file__))
@@ -79,6 +81,14 @@ def run_retrain():
     print("\n✅ Retrain complete.\n")
 
 
+def run_simulate():
+    print("\nNBA Predictor — Simulation Mode\n")
+    print("Skipping daily data refresh — launching UI in simulation-only mode.")
+    print("Use the Custom Matchup Simulator tab to model any matchup.\n")
+    app_path = os.path.join(os.path.dirname(__file__), "app.py")
+    subprocess.run([sys.executable, "-m", "streamlit", "run", app_path])
+
+
 def run_backtest():
     print("\nNBA Predictor — Backtesting Only\n")
     import pandas as pd
@@ -115,6 +125,7 @@ if __name__ == "__main__":
     parser.add_argument("--final",    action="store_true")
     parser.add_argument("--retrain",  action="store_true")
     parser.add_argument("--backtest", action="store_true")
+    parser.add_argument("--simulate", action="store_true")
     args = parser.parse_args()
 
     if args.setup:
@@ -127,5 +138,7 @@ if __name__ == "__main__":
         run_retrain()
     elif args.backtest:
         run_backtest()
+    elif args.simulate:
+        run_simulate()
     else:
         parser.print_help()

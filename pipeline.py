@@ -139,6 +139,10 @@ def run_tonight(final_run=False):
         return []
 
     games = pd.read_csv(games_path)
+    if games.empty:
+        print("No games scheduled tonight.")
+        return []
+
     print(f"\n[3] Predicting {len(games)} games...")
 
     all_predictions = []
