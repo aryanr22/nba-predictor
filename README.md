@@ -88,7 +88,13 @@ python run.py --daily       # every morning: refresh today's games/injuries + pr
 python run.py --final       # ~90 min before tip-off: re-resolve lineups off confirmed injury statuses
 python run.py --retrain     # weekly: refetch data, rebuild features, retrain + backtest both models
 python run.py --backtest    # backtest only, using whatever data/models already exist — no fetching or training
+python run.py --simulate    # offseason / no games: skip the daily refresh, launch UI in simulation-only mode
 ```
+
+During the offseason, when there are no live games scheduled, use `--simulate`
+instead of `--daily`/`--final` — it skips the daily data refresh entirely and
+launches straight into the Streamlit UI, defaulting to the Custom Matchup
+Simulator so you can still model hypothetical matchups.
 
 Then view results with:
 
@@ -109,6 +115,7 @@ simulator (pick any two teams and optionally mark players out), and **Ask Claude
 | `--final` | Same as `--daily`, but intended to run ~90 min before tip-off once injury designations are confirmed | Late afternoon / pre-game |
 | `--retrain` | Refetch all game logs, rebuild features, retrain + backtest both models from scratch | Weekly, to keep rolling stats and models current |
 | `--backtest` | Re-runs the walk-forward backtest on existing feature files without touching data or models | Whenever you want fresh accuracy numbers without a full retrain |
+| `--simulate` | Skips the daily data refresh and launches the Streamlit UI directly in simulation-only mode | Offseason, or any time there are no live games scheduled |
 
 ## Backtesting
 
